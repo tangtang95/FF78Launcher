@@ -19,6 +19,13 @@ An alternative launcher for FF7/FF8 Steam and eStore editions
 
 After you install the launcher, you will find a file named [`FF78Launcher.toml`](misc/FF78Launcher.toml). Feel free to have a look at the file to know what can you change.
 
+## How to build
+
+Requires to change paths to libc in build.zig files and .ini file
+```sh
+zig build --libc x86-windows-msvc-libc.ini
+```
+
 ## Supported languages
 
 For a full list of supported game launchers, see [this list](https://github.com/julianxhokaxhiu/FF78Launcher/blob/master/src/winmain.cpp#L23-L37)
