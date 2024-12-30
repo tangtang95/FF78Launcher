@@ -47,7 +47,7 @@ pub fn build(b: *std.Build) !void {
             "-DNOMINMAX", // NOTE: is it really needed?
         },
     });
-    // exe.addWin32ResourceFile(.{ .file = b.path("src/version.rc") });
+    exe.addWin32ResourceFile(.{ .file = b.path("src/version.rc") });
     b.installArtifact(exe);
 }
 

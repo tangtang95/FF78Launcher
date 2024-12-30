@@ -14,19 +14,18 @@
 /****************************************************************************/
 
 #include <windows.h>
-#include "@CMAKE_SOURCE_DIR@/src/resource.h"
 
-#define VER_FILEVERSION             @_EXE_RCVERSION@
-#define VER_FILEVERSION_STR         "@_EXE_RCSTRVERSION@\0"
+#define VER_FILEVERSION             1.0.0
+#define VER_FILEVERSION_STR         "1.0.0\0"
 
-#define VER_PRODUCTVERSION          @_EXE_RCVERSION@
-#define VER_PRODUCTVERSION_STR      "@_EXE_RCSTRVERSION@\0"
+#define VER_PRODUCTVERSION          1.0.0
+#define VER_PRODUCTVERSION_STR      "1.0.0\0"
 
-#define VER_INTERNALNAME            "@RELEASE_NAME@"
-#define VER_PRODUCTNAME             "@RELEASE_NAME@"
-#define VER_ORIGINALFILENAME        "@RELEASE_NAME@.exe"
+#define VER_INTERNALNAME            "FF78Launcher"
+#define VER_PRODUCTNAME             "FF78Launcher"
+#define VER_ORIGINALFILENAME        "FF78Launcher.exe"
 
-IDI_ICON1       ICON DISCARDABLE    "@CMAKE_SOURCE_DIR@\misc\@RELEASE_NAME@.ico"
+IDI_ICON1       ICON DISCARDABLE    "..\misc\FF78Launcher.ico"
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION     VER_FILEVERSION
 PRODUCTVERSION  VER_PRODUCTVERSION
