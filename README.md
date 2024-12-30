@@ -21,9 +21,22 @@ After you install the launcher, you will find a file named [`FF78Launcher.toml`]
 
 ## How to build
 
-Requires to change paths to libc in build.zig files and .ini file
+### Requirements
+
+- `zig` compiler (tested with 0.14.0-dev.2569+30169d1d2)
+- `xwin` tool for local development on non-x86 machine
+
+Download microsoft CRT headers and libraries, and Windows SDK headers and libraries:
+```
+xwin --arch=x86 --accept-license splat --output .xwin --include-debug-libs --include-debug-symbols --preserve-ms-arch-notation --disable-symlinks
+```
+
+### Build steps
 ```sh
-zig build --libc x86-windows-msvc-libc.ini
+# To build for debug mode
+zig build
+# To build for release fast mode
+zig build --release=fast
 ```
 
 ## Supported languages

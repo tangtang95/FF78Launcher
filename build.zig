@@ -26,12 +26,7 @@ pub fn build(b: *std.Build) !void {
     exe.linkSystemLibrary("user32");
     exe.linkSystemLibrary("shell32");
 
-    // Need to manually include C include path and library path due to zig unable to auto detect x86-windows-msvc paths
-    exe.addIncludePath(.{ .cwd_relative = "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\ucrt" });
-    exe.addIncludePath(.{ .cwd_relative = "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.38.33130/include" });
-    exe.addLibraryPath(.{ .cwd_relative = "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.38.33130/Lib/x86" });
-    exe.addLibraryPath(.{ .cwd_relative = "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.22621.0\\um\\x86" });
-    exe.addLibraryPath(.{ .cwd_relative = "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.22621.0\\ucrt\\x86" });
+    xWin(b, exe);
 
     exe.addCSourceFiles(.{
         .root = b.path("src"),
@@ -54,4 +49,31 @@ pub fn build(b: *std.Build) !void {
     });
     // exe.addWin32ResourceFile(.{ .file = b.path("src/version.rc") });
     b.installArtifact(exe);
+}
+
+fn xWin(b: *std.Build, exe: *std.Build.Step.Compile) void {
+    const arch: []const u8 = switch (exe.rootModuleTarget().cpu.arch) {
+        .x86_64 => "x64",
+        .x86 => "x86",
+        .arm, .armeb => "arm",
+        .aarch64 => "arm64",
+        else => @panic("Unsupported Architecture"),
+    };
+
+    exe.setLibCFile(b.path("libc.txt"));
+    exe.addSystemIncludePath(.{ .cwd_relative = sdkPath("/.xwin/crt/include") });
+    exe.addSystemIncludePath(.{ .cwd_relative = sdkPath("/.xwin/sdk/include/ucrt") });
+    exe.addSystemIncludePath(.{ .cwd_relative = sdkPath("/.xwin/sdk/include/um") });
+    exe.addLibraryPath(.{ .cwd_relative = b.fmt(sdkPath("/.xwin/crt/lib/{s}"), .{arch}) });
+    exe.addLibraryPath(.{ .cwd_relative = b.fmt(sdkPath("/.xwin/sdk/lib/ucrt/{s}"), .{arch}) });
+    exe.addLibraryPath(.{ .cwd_relative = b.fmt(sdkPath("/.xwin/sdk/lib/um/{s}"), .{arch}) });
+}
+
+fn sdkPath(comptime suffix: []const u8) []const u8 {
+    if (suffix[0] != '/') @compileError("relToPath requires an absolute path!");
+    return comptime blk: {
+        @setEvalBranchQuota(2000);
+        const root_dir = std.fs.path.dirname(@src().file) orelse ".";
+        break :blk root_dir ++ suffix;
+    };
 }

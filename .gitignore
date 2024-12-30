@@ -439,6 +439,8 @@ FodyWeavers.xsd
 # Build directory
 .build
 
-# Zig build system
+# Zig build system and xwin
 .zig-cache/
 zig-out/
+.xwin/
+.xwin-cache/
