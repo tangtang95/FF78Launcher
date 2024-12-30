@@ -48,16 +48,16 @@
 #define ESTORE_GAME_VERSION 17
 #define ESTORE_END_USER_INFO 20
 
-bool ff8 = false;
-bool ff7_estore_edition = false;
-bool uses_ffnx = false;
-char game_lang[3]{0};
+extern bool ff8;
+extern bool ff7_estore_edition;
+extern bool uses_ffnx;
+extern char game_lang[3];
 
-HANDLE gameCanReadMsgSem;
-HANDLE gameDidReadMsgSem;
-HANDLE launcherCanReadMsgSem;
-HANDLE launcherDidReadMsgSem;
-HANDLE sharedMemoryWithLauncher;
-LPVOID viewOfSharedMemory;
-uint32_t *launcher_memory_part;
-HANDLE processGameMessagesThread;
+extern HANDLE gameCanReadMsgSem;
+extern HANDLE gameDidReadMsgSem;
+extern HANDLE launcherCanReadMsgSem;
+extern HANDLE launcherDidReadMsgSem;
+extern HANDLE sharedMemoryWithLauncher;
+extern LPVOID viewOfSharedMemory;
+extern uint32_t *launcher_memory_part;
+extern HANDLE processGameMessagesThread;

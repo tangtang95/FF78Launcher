@@ -19,6 +19,20 @@
 #include "globals.h"
 #include "utils.h"
 
+bool ff8 = false;
+bool ff7_estore_edition = false;
+bool uses_ffnx = false;
+char game_lang[3]{0};
+
+HANDLE gameCanReadMsgSem;
+HANDLE gameDidReadMsgSem;
+HANDLE launcherCanReadMsgSem;
+HANDLE launcherDidReadMsgSem;
+HANDLE sharedMemoryWithLauncher;
+LPVOID viewOfSharedMemory;
+uint32_t *launcher_memory_part;
+HANDLE processGameMessagesThread;
+
 std::wstring getDocumentPath()
 {
 	std::wstring payload;

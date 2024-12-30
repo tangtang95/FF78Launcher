@@ -22,7 +22,7 @@ inline bool startsWith(const char *pre, const char *str)
   return strncmp(pre, str, strlen(pre)) == 0;
 }
 
-auto operator""_MB( unsigned long long const x ) -> long { return 1024L*1024L*x; }
+inline auto operator""_MB( unsigned long long const x ) -> long { return 1024L*1024L*x; }
 
 
 // trim from start (in place)

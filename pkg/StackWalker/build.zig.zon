@@ -1,0 +1,14 @@
+.{
+    .name = "StackWalker",
+    .version = "0.0.0",
+    .dependencies = .{
+        .StackWalker = .{
+            .url = "https://github.com/JochenKalmbach/StackWalker/archive/refs/tags/2023-06-24.tar.gz",
+            .hash = "1220de7238ac454d3452b8726c74f1b5bdc207577ecb1aa3072c611f1771ca26a4ec",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+    },
+}

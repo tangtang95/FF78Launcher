@@ -1,0 +1,16 @@
+.{
+    .name = "FF78Launcher",
+    .version = "0.0.0",
+    .dependencies = .{
+        .StackWalker = .{ .path = "./pkg/StackWalker" },
+        .plog = .{
+            .url = "https://github.com/SergiusTheBest/plog/archive/refs/tags/1.1.10.tar.gz",
+            .hash = "1220e0f3aac3326f6299e0be9999b6313cee0879822a83b0b88b4c4984d982bc1337",
+        },
+        .tomlplusplus = .{
+            .url = "https://github.com/marzer/tomlplusplus/archive/refs/tags/v3.4.0.tar.gz",
+            .hash = "1220f508e76d0dd9839a7a257d6760e36069f2eb32c4d1314967fa8ba190d8f66df7",
+        },
+    },
+    .paths = .{ "" },
+}
