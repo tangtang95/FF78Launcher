@@ -2,6 +2,7 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) !void {
     const app_name = "FF78Launcher";
+    const version = b.option([]const u8, "version", "application version") orelse "0.0.0";
     const target = b.standardTargetOptions(.{ .default_target = .{ .cpu_arch = .x86, .abi = .msvc } });
     const optimize = b.standardOptimizeOption(.{});
     if (target.result.os.tag != .windows or target.result.abi != .msvc) {
@@ -16,11 +17,11 @@ pub fn build(b: *std.Build) !void {
         .name = app_name,
         .target = target,
         .optimize = optimize,
-        .version = .{ .major = 0, .minor = 3, .patch = 0 },
+        .version = try std.SemanticVersion.parse(version),
     });
     exe.addWin32ResourceFile(.{ .file = b.path("src/version.rc"), .flags = &.{
-        "/dVER_FILEVERSION=0.3.0",
-        "/dVER_FILEVERSION_STR=\"0.3.0\\0\"",
+        b.fmt("/dVER_FILEVERSION={s}", .{ version }),
+        b.fmt("/dVER_FILEVERSION_STR=\"{s}\\0\"", .{ version }),
         "/dVER_PRODUCTNAME=\"" ++ app_name ++ "\"",
         "/dVER_ORIGINALFILENAME=\"" ++ app_name ++ ".exe\"",
     } });
@@ -55,7 +56,7 @@ pub fn build(b: *std.Build) !void {
             "-DWIN32",
             "-DWIN32_WINNT=0x0601",
             "-DAPP_RELEASE_NAME=\"" ++ app_name ++ "\"",
-            "-DAPP_RELEASE_VERSION=\"0.3.0\"",
+            b.fmt("-DAPP_RELEASE_VERSION=\"{s}\"", .{ version }),
             "-DAPP_CONFIG_FILE=\"" ++ app_name ++ ".toml\"",
             "-DTOML_ENABLE_SIMD=0", // TODO: temporary disabling SIMD to build
             "-D_CRT_SECURE_NO_WARNINGS", // TODO: remove
