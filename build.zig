@@ -1,8 +1,11 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) !void {
-    const target = b.standardTargetOptions(.{ .default_target = .{ .cpu_arch = .x86, .abi = .msvc, .os_tag = .windows } });
+    const target = b.standardTargetOptions(.{ .default_target = .{ .cpu_arch = .x86, .abi = .msvc } });
     const optimize = b.standardOptimizeOption(.{});
+    if (target.result.os.tag != .windows or target.result.abi != .msvc) {
+        @panic("build supported only for windows msvc abi");
+    }
 
     const exe = b.addExecutable(.{
         .name = "FF78Launcher",
@@ -10,6 +13,7 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     exe.linkLibC();
+    exe.want_lto = false;
 
     const plog = b.dependency("plog", .{});
     const tomlplusplus = b.dependency("tomlplusplus", .{});
@@ -26,7 +30,10 @@ pub fn build(b: *std.Build) !void {
     exe.linkSystemLibrary("user32");
     exe.linkSystemLibrary("shell32");
 
-    xWin(b, exe);
+    // for compiling to a different arch than native (e.g. x86 on x86_64 machine), use xwin
+    if(exe.rootModuleTarget().cpu.arch != b.graph.host.result.cpu.arch) {
+        setLibcWithXWin(b, exe);
+    }
 
     exe.addCSourceFiles(.{
         .root = b.path("src"),
@@ -49,14 +56,13 @@ pub fn build(b: *std.Build) !void {
     });
     exe.addWin32ResourceFile(.{ .file = b.path("src/version.rc") });
     b.installArtifact(exe);
+    b.installFile("LICENSE", "bin/COPYING.txt");
+    b.installFile("misc/FF78Launcher.toml", "bin/FF78Launcher.toml");
 }
 
-fn xWin(b: *std.Build, exe: *std.Build.Step.Compile) void {
+fn setLibcWithXWin(b: *std.Build, exe: *std.Build.Step.Compile) void {
     const arch: []const u8 = switch (exe.rootModuleTarget().cpu.arch) {
-        .x86_64 => "x64",
         .x86 => "x86",
-        .arm, .armeb => "arm",
-        .aarch64 => "arm64",
         else => @panic("Unsupported Architecture"),
     };
 
