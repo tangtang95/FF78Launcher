@@ -24,12 +24,6 @@ After you install the launcher, you will find a file named [`FF78Launcher.toml`]
 ### Requirements
 
 - `zig` compiler (tested with 0.14.0-dev.2569+30169d1d2)
-- `xwin` tool for local development on non-x86 machine
-
-Download microsoft CRT headers and libraries, and Windows SDK headers and libraries:
-```
-xwin --arch=x86 --accept-license splat --output .xwin --include-debug-libs --include-debug-symbols --preserve-ms-arch-notation --disable-symlinks
-```
 
 ### Build steps
 ```sh
@@ -37,6 +31,20 @@ xwin --arch=x86 --accept-license splat --output .xwin --include-debug-libs --inc
 zig build
 # To build for release fast mode
 zig build --release=fast
+```
+
+### For cross compilation
+
+It is required to use `xwin` tool to download microsoft CRT/SDK headers and libraries  with the following command:
+```sh
+xwin --arch=x86 --accept-license splat --output .xwin --include-debug-libs --include-debug-symbols --preserve-ms-arch-notation --disable-symlinks
+```
+if on Linux, please omit `--disable-symlinks` from the previous command.
+This is required also for x86_64 windows machine unless it is fixed on zig upstream.
+
+Then build with the following command:
+```sh
+zig build -Dtarget=x86-windows-msvc -Duse-xwin-libc
 ```
 
 ## Supported languages

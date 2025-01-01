@@ -1,10 +1,12 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub fn build(b: *std.Build) !void {
     const app_name = "FF78Launcher";
     const version = b.option([]const u8, "version", "application version") orelse "0.0.0";
     const target = b.standardTargetOptions(.{ .default_target = .{ .cpu_arch = .x86, .abi = .msvc } });
     const optimize = b.standardOptimizeOption(.{});
+    const use_xwin = b.option(bool, "use-xwin-libc", "use xwin libc for cross compilation") orelse false;
     if (target.result.os.tag != .windows or target.result.abi != .msvc) {
         @panic("build supported only for windows msvc abi");
     }
@@ -18,6 +20,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
         .version = try std.SemanticVersion.parse(version),
+        .link_libc = true,
     });
     exe.addWin32ResourceFile(.{ .file = b.path("src/version.rc"), .flags = &.{
         b.fmt("/dVER_FILEVERSION={s}", .{ version }),
@@ -25,24 +28,24 @@ pub fn build(b: *std.Build) !void {
         "/dVER_PRODUCTNAME=\"" ++ app_name ++ "\"",
         "/dVER_ORIGINALFILENAME=\"" ++ app_name ++ ".exe\"",
     } });
-    exe.want_lto = false;
-
-    // for compiling to a different arch than native (e.g. x86 on x86_64 machine), use xwin
-    if(exe.rootModuleTarget().cpu.arch != b.graph.host.result.cpu.arch) {
-        setLibcWithXWin(b, exe);
-    }
-    exe.linkLibC();
 
     exe.addIncludePath(plog.path("include"));
     exe.addIncludePath(tomlplusplus.path("include"));
     exe.addIncludePath(stackwalker.path(""));
     exe.addIncludePath(b.path("src"));
     exe.linkLibrary(stackwalker.artifact("StackWalker"));
+
+    // Zig does not add the same default libc libs for MSVC like Visual Studio compiler
     exe.linkSystemLibrary("shlwapi");
     exe.linkSystemLibrary("ole32");
     exe.linkSystemLibrary("advapi32");
     exe.linkSystemLibrary("user32");
     exe.linkSystemLibrary("shell32");
+
+    // For cross compilation, use xwin libc
+    if(use_xwin) {
+        setLibcWithXWin(b, exe);
+    }
 
     exe.addCSourceFiles(.{
         .root = b.path("src"),
