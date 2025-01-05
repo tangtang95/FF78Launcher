@@ -143,7 +143,7 @@ unsafe extern "system" fn exception_handler(ep: *const EXCEPTION_POINTERS) -> i3
     }
 
     HAD_EXCEPTION = true;
-    let exception_record = unsafe { &*(*ep).ExceptionRecord };
+    let exception_record = &*(*ep).ExceptionRecord;
     log::error!(
         "Exception 0x{:x}, address 0x{:x}",
         exception_record.ExceptionCode.0,
