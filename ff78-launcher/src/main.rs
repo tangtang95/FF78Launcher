@@ -2,18 +2,27 @@ use std::os::windows::fs::MetadataExt;
 
 use anyhow::Result;
 use config::Config;
+use launcher::{write_ffsound, write_ffvideo};
 use log::LevelFilter;
 use windows::{
     core::{s, PCSTR, PSTR},
-    Win32::{Foundation::CloseHandle, System::{
-        Diagnostics::Debug::{
-            SetUnhandledExceptionFilter, EXCEPTION_CONTINUE_EXECUTION, EXCEPTION_POINTERS,
+    Win32::{
+        Foundation::CloseHandle,
+        System::{
+            Diagnostics::Debug::{
+                SetUnhandledExceptionFilter, EXCEPTION_CONTINUE_EXECUTION, EXCEPTION_POINTERS,
+            },
+            Threading::{
+                CreateProcessA, CreateSemaphoreA, WaitForSingleObject, INFINITE,
+                PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTUPINFOA,
+            },
         },
-        Threading::{CreateProcessA, WaitForSingleObject, INFINITE, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTUPINFOA},
-    }, UI::WindowsAndMessaging::{MessageBoxA, MB_ICONERROR, MB_OK}},
+        UI::WindowsAndMessaging::{MessageBoxA, MB_ICONERROR, MB_OK},
+    },
 };
 
 mod config;
+mod launcher;
 
 const APP_NAME: &str = "FF78Launcher";
 const LOG_FILE: &str = "FF78Launcher.log";
@@ -46,10 +55,11 @@ enum GameType {
     FF8,
 }
 
-struct Context {
-    game_to_lanch: GameType,
+pub struct Context {
+    game_to_launch: GameType,
     game_lang: String,
     use_ffnx: bool,
+    config: Config,
 }
 
 fn main() -> Result<()> {
@@ -70,7 +80,7 @@ fn main() -> Result<()> {
         return Err(anyhow::anyhow!("No process to start found!"));
     };
 
-    let game_type = match &process_to_start {
+    let game_to_launch = match &process_to_start {
         name if name.starts_with("ff8") => GameType::FF8,
         name if name.starts_with("ff7_ja")
             && std::fs::metadata(AF3DN_FILE)
@@ -87,7 +97,7 @@ fn main() -> Result<()> {
         .split('_')
         .take(2)
         .last()
-        .map(|end| end.trim_end_matches(".exe"));
+        .map(|end| end.trim_end_matches(".exe").to_string());
     let Some(game_lang) = game_lang else {
         log::error!(
             "No language found for process to start: {}",
@@ -96,35 +106,44 @@ fn main() -> Result<()> {
         return Err(anyhow::anyhow!("No language found!"));
     };
 
-    let config = Config::from_config_file(&(APP_NAME.to_string() + ".toml"), game_type)?;
+    let config = Config::from_config_file(&(APP_NAME.to_string() + ".toml"), &game_to_launch)?;
     log::info!("config: {:?}", config);
 
     if config.launch_chocobo {
-        process_to_start = format!("chocobo_{}.exe", game_lang);
+        process_to_start = format!("chocobo_{}.exe", &game_lang);
     }
 
-    if !use_ffnx || config.launch_chocobo {
-        // TODO:
-    } else {
-        let startup_info = STARTUPINFOA::default();
-        let mut process_info = PROCESS_INFORMATION::default();
-        unsafe {
-            let Ok(_) = CreateProcessA(
-                PCSTR(process_to_start.as_ptr()),
-                PSTR::null(),
-                None,
-                None,
-                false,
-                PROCESS_CREATION_FLAGS::default(),
-                None,
-                None,
-                &startup_info,
-                &mut process_info,
-            ) else {
-                _ = MessageBoxA(None, s!("Something went wrong while launching the game."), s!("Error"), MB_ICONERROR | MB_OK);
-                return Err(anyhow::anyhow!("Something went wrong while launching the game"));
-            };
+    let ctx = Context {
+        game_to_launch,
+        game_lang: game_lang.to_string(),
+        use_ffnx,
+        config,
+    };
 
+    if !use_ffnx || ctx.config.launch_chocobo {
+        if !use_ffnx {
+            write_ffvideo(&ctx)?;
+            write_ffsound(&ctx)?;
+        }
+        unsafe {
+            let game_read_sem = CreateSemaphoreA(None, 0, 1, PCSTR("test".as_ptr()))?;
+            // TODO:
+        }
+
+        let process_info = create_game_process(process_to_start)?;
+
+        unsafe {
+            WaitForSingleObject(process_info.hProcess, INFINITE);
+
+            // Close process and thread handles
+            _ = CloseHandle(process_info.hProcess);
+            _ = CloseHandle(process_info.hThread);
+        }
+
+        todo!()
+    } else {
+        let process_info = create_game_process(process_to_start)?;
+        unsafe {
             WaitForSingleObject(process_info.hProcess, INFINITE);
 
             _ = CloseHandle(process_info.hProcess);
@@ -133,6 +152,36 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn create_game_process(process_to_start: String) -> Result<PROCESS_INFORMATION> {
+    let startup_info = STARTUPINFOA::default();
+    let mut process_info = PROCESS_INFORMATION::default();
+    unsafe {
+        let Ok(_) = CreateProcessA(
+            PCSTR(process_to_start.as_ptr()),
+            PSTR::null(),
+            None,
+            None,
+            false,
+            PROCESS_CREATION_FLAGS::default(),
+            None,
+            None,
+            &startup_info,
+            &mut process_info,
+        ) else {
+            _ = MessageBoxA(
+                None,
+                s!("Something went wrong while launching the game."),
+                s!("Error"),
+                MB_ICONERROR | MB_OK,
+            );
+            return Err(anyhow::anyhow!(
+                "Something went wrong while launching the game"
+            ));
+        };
+    }
+    Ok(process_info)
 }
 
 unsafe extern "system" fn exception_handler(ep: *const EXCEPTION_POINTERS) -> i32 {

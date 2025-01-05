@@ -37,7 +37,7 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn from_config_file(path: &str, game_type: GameType) -> Result<Self> {
+    pub fn from_config_file(path: &str, game_type: &GameType) -> Result<Self> {
         let file_contents = std::fs::read(path);
         let Ok(file_contents) = file_contents else {
             return Ok(Config::default());
