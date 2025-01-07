@@ -39,9 +39,7 @@ impl Default for Config {
 impl Config {
     pub fn from_config_file(path: &str, game_type: &GameType) -> Result<Self> {
         let file_contents = std::fs::read(path);
-        let Ok(file_contents) = file_contents else {
-            return Ok(Config::default());
-        };
+        let file_contents = file_contents.unwrap_or_default();
         let table: toml::Table = toml::from_str(std::str::from_utf8(&file_contents)?)?;
 
         let fullscreen = table
@@ -69,6 +67,7 @@ impl Config {
             let display_settings_found = unsafe {
                 EnumDisplaySettingsA(None, ENUM_CURRENT_SETTINGS, &mut display_settings).as_bool()
             };
+            log::info!("Display settings found: {}x{} (refresh rate: {})", display_settings.dmPelsWidth, display_settings.dmPelsHeight, display_settings.dmDisplayFrequency);
             if fullscreen && display_settings_found {
                 window_width = display_settings.dmPelsWidth;
                 window_height = display_settings.dmPelsHeight;

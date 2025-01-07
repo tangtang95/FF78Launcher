@@ -1,4 +1,6 @@
-use std::os::windows::fs::MetadataExt;
+#![windows_subsystem = "windows"]
+
+use std::{os::windows::fs::MetadataExt, path::PathBuf};
 
 use anyhow::Result;
 use config::Config;
@@ -45,16 +47,19 @@ const AF3DN_FILE: &str = "AF3DN.P";
 
 static mut HAD_EXCEPTION: bool = false;
 
+#[derive(Debug)]
 enum StoreType {
     Standard,
     EStore,
 }
 
+#[derive(Debug)]
 enum GameType {
     FF7(StoreType),
     FF8,
 }
 
+#[derive(Debug)]
 pub struct Context {
     game_to_launch: GameType,
     game_lang: String,
@@ -70,12 +75,18 @@ fn main() -> Result<()> {
         SetUnhandledExceptionFilter(Some(exception_handler));
     };
 
-    let process_to_start = PROCESSES
+    let processes_available: Vec<&str> = PROCESSES
         .into_iter()
-        .filter(|process| std::fs::exists(process).is_ok())
-        .last()
-        .map(|s| s.to_string());
-    let Some(mut process_to_start) = process_to_start else {
+        .filter(|process| matches!(std::fs::exists(process), Ok(true)))
+        .collect();
+    if processes_available.len() > 1 {
+        log::error!(
+            "More than one process to start found: {:?}",
+            processes_available
+        );
+        return Err(anyhow::anyhow!("No process to start found"));
+    }
+    let Some(mut process_to_start) = processes_available.first().map(|s| s.to_string()) else {
         log::error!("No process to start found!");
         return Err(anyhow::anyhow!("No process to start found!"));
     };
@@ -120,7 +131,13 @@ fn main() -> Result<()> {
         config,
     };
 
+    let process_to_start_path = std::fs::canonicalize(&process_to_start)?;
     if !use_ffnx || ctx.config.launch_chocobo {
+        log::info!(
+            "Launching process {:?} without FFNx context: {:?}",
+            process_to_start_path,
+            &ctx
+        );
         if !use_ffnx {
             write_ffvideo(&ctx)?;
             write_ffsound(&ctx)?;
@@ -130,7 +147,8 @@ fn main() -> Result<()> {
             // TODO:
         }
 
-        let process_info = create_game_process(process_to_start)?;
+        let process_info = create_game_process(process_to_start_path)?;
+        log::info!("Process launched (process_id: {})!", process_info.dwProcessId);
 
         unsafe {
             WaitForSingleObject(process_info.hProcess, INFINITE);
@@ -142,7 +160,13 @@ fn main() -> Result<()> {
 
         todo!()
     } else {
-        let process_info = create_game_process(process_to_start)?;
+        log::info!(
+            "Launching process {:?} with FFNx context: {:?}",
+            process_to_start_path,
+            &ctx
+        );
+        let process_info = create_game_process(process_to_start_path)?;
+        log::info!("Process launched (process_id: {})!", process_info.dwProcessId);
         unsafe {
             WaitForSingleObject(process_info.hProcess, INFINITE);
 
@@ -154,12 +178,12 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn create_game_process(process_to_start: String) -> Result<PROCESS_INFORMATION> {
+fn create_game_process(process_to_start: PathBuf) -> Result<PROCESS_INFORMATION> {
     let startup_info = STARTUPINFOA::default();
     let mut process_info = PROCESS_INFORMATION::default();
     unsafe {
         let Ok(_) = CreateProcessA(
-            PCSTR(process_to_start.as_ptr()),
+            PCSTR(process_to_start.into_os_string().as_encoded_bytes().as_ptr()),
             PSTR::null(),
             None,
             None,
@@ -176,6 +200,7 @@ fn create_game_process(process_to_start: String) -> Result<PROCESS_INFORMATION> 
                 s!("Error"),
                 MB_ICONERROR | MB_OK,
             );
+            log::error!("Something went wrong while launching the game.");
             return Err(anyhow::anyhow!(
                 "Something went wrong while launching the game"
             ));
