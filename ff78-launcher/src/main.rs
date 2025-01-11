@@ -13,10 +13,13 @@ use windows::{
             Diagnostics::Debug::{
                 SetUnhandledExceptionFilter, EXCEPTION_CONTINUE_EXECUTION, EXCEPTION_POINTERS,
             },
-            Memory::{CreateFileMappingA, MapViewOfFile, FILE_MAP_ALL_ACCESS, PAGE_READWRITE},
+            Memory::{
+                CreateFileMappingA, MapViewOfFile, UnmapViewOfFile, FILE_MAP_ALL_ACCESS,
+                PAGE_READWRITE,
+            },
             Threading::{
-                CreateProcessA, CreateSemaphoreA, WaitForSingleObject, INFINITE,
-                PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTUPINFOA,
+                CreateProcessA, CreateSemaphoreA, CreateThread, WaitForSingleObject, INFINITE,
+                PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTUPINFOA, THREAD_CREATION_FLAGS,
             },
         },
         UI::WindowsAndMessaging::{MessageBoxA, MB_ICONERROR, MB_OK},
@@ -65,6 +68,10 @@ pub struct Context {
     game_lang: String,
     use_ffnx: bool,
     config: Config,
+}
+
+unsafe extern "system" fn process_game_messages(_: *mut core::ffi::c_void) -> u32 {
+    todo!()
 }
 
 fn main() -> Result<()> {
@@ -154,74 +161,77 @@ fn launch_process() -> Result<()> {
             write_ffvideo(&ctx)?;
             write_ffsound(&ctx)?;
         }
+        let name_prefix = match ctx.config.launch_chocobo {
+            true => "choco",
+            false => match ctx.game_to_launch {
+                GameType::FF7(_) => "ff7",
+                GameType::FF8 => "ff8",
+            },
+        };
+        let game_can_read_name = CString::new(name_prefix.to_owned() + "_gameCanReadMsgSem")?;
+        let game_did_read_name = CString::new(name_prefix.to_owned() + "_gameDidReadMsgSem")?;
+        let launcher_can_read_name =
+            CString::new(name_prefix.to_owned() + "_launcherCanReadMsgSem")?;
+        let launcher_did_read_name =
+            CString::new(name_prefix.to_owned() + "_launcherDidReadMsgSem")?;
+        let shared_memory_name =
+            CString::new(name_prefix.to_owned() + "_sharedMemoryWithLauncher")?;
         unsafe {
-            let name_prefix = match ctx.config.launch_chocobo {
-                true => "choco",
-                false => match ctx.game_to_launch {
-                    GameType::FF7(_) => "ff7",
-                    GameType::FF8 => "ff8",
-                },
-            };
-            let game_can_read_sem = CreateSemaphoreA(
-                None,
-                0,
-                1,
-                PCSTR(CString::new(name_prefix.to_owned() + "_gameCanReadMsgSem")?.as_ptr() as _),
-            )?;
-            let game_did_read_sem = CreateSemaphoreA(
-                None,
-                0,
-                1,
-                PCSTR(CString::new(name_prefix.to_owned() + "_gameDidReadMsgSem")?.as_ptr() as _),
-            )?;
-            let launcher_can_read_sem = CreateSemaphoreA(
-                None,
-                0,
-                1,
-                PCSTR(
-                    CString::new(name_prefix.to_owned() + "_launcherCanReadMsgSem")?.as_ptr() as _,
-                ),
-            )?;
-            let launcher_did_read_sem = CreateSemaphoreA(
-                None,
-                0,
-                1,
-                PCSTR(
-                    CString::new(name_prefix.to_owned() + "_launcherDidReadMsgSem")?.as_ptr() as _,
-                ),
-            )?;
-            let shared_memory_name = name_prefix.to_owned() + "_sharedMemoryWithLauncher";
+            let game_can_read_sem =
+                CreateSemaphoreA(None, 0, 1, PCSTR(game_can_read_name.as_ptr() as _))?;
+            let game_did_read_sem =
+                CreateSemaphoreA(None, 0, 1, PCSTR(game_did_read_name.as_ptr() as _))?;
+            let launcher_can_read_sem =
+                CreateSemaphoreA(None, 0, 1, PCSTR(launcher_can_read_name.as_ptr() as _))?;
+            let launcher_did_read_sem =
+                CreateSemaphoreA(None, 0, 1, PCSTR(launcher_did_read_name.as_ptr() as _))?;
             let shared_memory = CreateFileMappingA(
                 INVALID_HANDLE_VALUE,
                 None,
                 PAGE_READWRITE,
                 0,
                 0x20000,
-                PCSTR(CString::new(shared_memory_name)?.as_ptr() as _),
+                PCSTR(shared_memory_name.as_ptr() as _),
             )?;
             let view_shared_memory = MapViewOfFile(shared_memory, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+            let launcher_memory_part = view_shared_memory.Value.offset(0x10000);
+            let process_game_messages_thread = CreateThread(
+                None,
+                0,
+                Some(process_game_messages),
+                None,
+                THREAD_CREATION_FLAGS::default(),
+                None,
+            )?;
+            let process_info = create_game_process(CString::new(process_filename)?)?;
+            log::info!(
+                "Process launched (process_id: {})!",
+                process_info.dwProcessId
+            );
 
-            // TODO:
-            //
-            // launcher_memory_part = (uint32_t *)((uint8_t *)viewOfSharedMemory + 0x10000);
-            // processGameMessagesThread = CreateThread(NULL, 0, process_game_messages, NULL, NULL, NULL);
-        }
+            // send_locale_data_dir();
+            // send_user_save_dir();
+            // send_user_doc_dir();
+            // send_install_dir();
+            // send_game_version();
+            // send_disable_cloud();
+            // send_bg_pause_enabled();
+            // send_launcher_completed();
 
-        let process_info = create_game_process(CString::new(process_filename)?)?;
-        log::info!(
-            "Process launched (process_id: {})!",
-            process_info.dwProcessId
-        );
-
-        unsafe {
             WaitForSingleObject(process_info.hProcess, INFINITE);
 
             // Close process and thread handles
             _ = CloseHandle(process_info.hProcess);
             _ = CloseHandle(process_info.hThread);
-        }
+            _ = CloseHandle(process_game_messages_thread);
 
-        todo!()
+            _ = UnmapViewOfFile(view_shared_memory);
+            _ = CloseHandle(shared_memory);
+            _ = CloseHandle(game_did_read_sem);
+            _ = CloseHandle(game_can_read_sem);
+            _ = CloseHandle(launcher_did_read_sem);
+            _ = CloseHandle(launcher_can_read_sem);
+        }
     } else {
         log::info!(
             "Launching process {:?} with FFNx context: {:?}",
