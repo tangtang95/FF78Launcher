@@ -1,19 +1,19 @@
 #![windows_subsystem = "windows"]
 
-use std::{ffi::OsString, os::windows::fs::MetadataExt, path::{Path, PathBuf}};
-
 use anyhow::Result;
 use config::Config;
 use launcher::{write_ffsound, write_ffvideo};
 use log::LevelFilter;
+use std::{ffi::CString, os::windows::fs::MetadataExt};
 use windows::{
     core::{s, PCSTR, PSTR},
     Win32::{
-        Foundation::CloseHandle,
+        Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
         System::{
             Diagnostics::Debug::{
                 SetUnhandledExceptionFilter, EXCEPTION_CONTINUE_EXECUTION, EXCEPTION_POINTERS,
             },
+            Memory::{CreateFileMappingA, MapViewOfFile, FILE_MAP_ALL_ACCESS, PAGE_READWRITE},
             Threading::{
                 CreateProcessA, CreateSemaphoreA, WaitForSingleObject, INFINITE,
                 PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTUPINFOA,
@@ -75,19 +75,27 @@ fn main() -> Result<()> {
         SetUnhandledExceptionFilter(Some(exception_handler));
     };
 
+    match launch_process() {
+        Ok(_) => Ok(()),
+        Err(err) => {
+            log::error!("Launching process failed due: {:?}", err);
+            Err(err)
+        }
+    }
+}
+
+fn launch_process() -> Result<()> {
     let processes_available: Vec<&str> = PROCESSES
         .into_iter()
         .filter(|process| matches!(std::fs::exists(process), Ok(true)))
         .collect();
     if processes_available.len() > 1 {
-        log::error!(
+        return Err(anyhow::anyhow!(
             "More than one process to start found: {:?}",
             processes_available
-        );
-        return Err(anyhow::anyhow!("No process to start found"));
+        ));
     }
     let Some(mut process_to_start) = processes_available.first().map(|s| s.to_string()) else {
-        log::error!("No process to start found!");
         return Err(anyhow::anyhow!("No process to start found!"));
     };
 
@@ -110,11 +118,10 @@ fn main() -> Result<()> {
         .last()
         .map(|end| end.trim_end_matches(".exe").to_string());
     let Some(game_lang) = game_lang else {
-        log::error!(
-            "No language found for process to start: {}",
+        return Err(anyhow::anyhow!(
+            "No language found for process: {}",
             process_to_start
-        );
-        return Err(anyhow::anyhow!("No language found!"));
+        ));
     };
 
     let config = Config::from_config_file(&(APP_NAME.to_string() + ".toml"), &game_to_launch)?;
@@ -131,12 +138,16 @@ fn main() -> Result<()> {
         config,
     };
 
-    let process_cwd = std::fs::canonicalize(&process_to_start)?.parent().unwrap().to_owned();
-    let process_to_start_path = std::fs::canonicalize(&process_to_start)?.file_name().unwrap().to_os_string().into_string().unwrap();
+    let process_filename = std::fs::canonicalize(&process_to_start)?
+        .file_name()
+        .ok_or(anyhow::anyhow!("Filename of process not found"))?
+        .to_os_string()
+        .into_string()
+        .map_err(|_| anyhow::anyhow!("Couldn't transform OsString to String"))?;
     if !use_ffnx || ctx.config.launch_chocobo {
         log::info!(
             "Launching process {:?} without FFNx context: {:?}",
-            process_to_start_path,
+            process_filename,
             &ctx
         );
         if !use_ffnx {
@@ -144,11 +155,59 @@ fn main() -> Result<()> {
             write_ffsound(&ctx)?;
         }
         unsafe {
-            let game_read_sem = CreateSemaphoreA(None, 0, 1, PCSTR("test".as_ptr()))?;
+            let name_prefix = match ctx.config.launch_chocobo {
+                true => "choco",
+                false => match ctx.game_to_launch {
+                    GameType::FF7(_) => "ff7",
+                    GameType::FF8 => "ff8",
+                },
+            };
+            let game_can_read_sem = CreateSemaphoreA(
+                None,
+                0,
+                1,
+                PCSTR(CString::new(name_prefix.to_owned() + "_gameCanReadMsgSem")?.as_ptr() as _),
+            )?;
+            let game_did_read_sem = CreateSemaphoreA(
+                None,
+                0,
+                1,
+                PCSTR(CString::new(name_prefix.to_owned() + "_gameDidReadMsgSem")?.as_ptr() as _),
+            )?;
+            let launcher_can_read_sem = CreateSemaphoreA(
+                None,
+                0,
+                1,
+                PCSTR(
+                    CString::new(name_prefix.to_owned() + "_launcherCanReadMsgSem")?.as_ptr() as _,
+                ),
+            )?;
+            let launcher_did_read_sem = CreateSemaphoreA(
+                None,
+                0,
+                1,
+                PCSTR(
+                    CString::new(name_prefix.to_owned() + "_launcherDidReadMsgSem")?.as_ptr() as _,
+                ),
+            )?;
+            let shared_memory_name = name_prefix.to_owned() + "_sharedMemoryWithLauncher";
+            let shared_memory = CreateFileMappingA(
+                INVALID_HANDLE_VALUE,
+                None,
+                PAGE_READWRITE,
+                0,
+                0x20000,
+                PCSTR(CString::new(shared_memory_name)?.as_ptr() as _),
+            )?;
+            let view_shared_memory = MapViewOfFile(shared_memory, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+
             // TODO:
+            //
+            // launcher_memory_part = (uint32_t *)((uint8_t *)viewOfSharedMemory + 0x10000);
+            // processGameMessagesThread = CreateThread(NULL, 0, process_game_messages, NULL, NULL, NULL);
         }
 
-        let process_info = create_game_process(process_to_start_path, &process_cwd)?;
+        let process_info = create_game_process(CString::new(process_filename)?)?;
         log::info!(
             "Process launched (process_id: {})!",
             process_info.dwProcessId
@@ -166,10 +225,10 @@ fn main() -> Result<()> {
     } else {
         log::info!(
             "Launching process {:?} with FFNx context: {:?}",
-            process_to_start_path,
+            process_filename,
             &ctx
         );
-        let process_info = create_game_process(process_to_start_path, &process_cwd)?;
+        let process_info = create_game_process(CString::new(process_filename)?)?;
         log::info!(
             "Process launched (process_id: {})!",
             process_info.dwProcessId
@@ -185,7 +244,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn create_game_process(process_to_start: String, process_cwd: &Path) -> Result<PROCESS_INFORMATION> {
+fn create_game_process(process_to_start: CString) -> Result<PROCESS_INFORMATION> {
     let startup_info = STARTUPINFOA {
         cb: size_of::<STARTUPINFOA>() as u32,
         ..Default::default()
@@ -193,14 +252,14 @@ fn create_game_process(process_to_start: String, process_cwd: &Path) -> Result<P
     let mut process_info = PROCESS_INFORMATION::default();
     unsafe {
         match CreateProcessA(
-            PCSTR(process_to_start.as_ptr()),
+            PCSTR(process_to_start.as_ptr() as _),
             PSTR::null(),
             None,
             None,
             false,
             PROCESS_CREATION_FLAGS::default(),
             None,
-            PCSTR(process_cwd.as_os_str().as_encoded_bytes().as_ptr()),
+            None,
             &startup_info,
             &mut process_info,
         ) {
@@ -212,10 +271,10 @@ fn create_game_process(process_to_start: String, process_cwd: &Path) -> Result<P
                     s!("Error"),
                     MB_ICONERROR | MB_OK,
                 );
-                log::error!("Something went wrong while launching the game (process_id {}): {:?}", process_info.dwProcessId, err);
-                return Err(anyhow::anyhow!(
-                    format!("Something went wrong while launching the game: {:?}", err)
-                ));
+                return Err(anyhow::anyhow!(format!(
+                    "Something went wrong while launching the game: {:?}",
+                    err
+                )));
             }
         };
     }
