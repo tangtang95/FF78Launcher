@@ -1,6 +1,6 @@
 #![windows_subsystem = "windows"]
 
-use std::{os::windows::fs::MetadataExt, path::PathBuf};
+use std::{ffi::OsString, os::windows::fs::MetadataExt, path::{Path, PathBuf}};
 
 use anyhow::Result;
 use config::Config;
@@ -131,7 +131,8 @@ fn main() -> Result<()> {
         config,
     };
 
-    let process_to_start_path = std::fs::canonicalize(&process_to_start)?;
+    let process_cwd = std::fs::canonicalize(&process_to_start)?.parent().unwrap().to_owned();
+    let process_to_start_path = std::fs::canonicalize(&process_to_start)?.file_name().unwrap().to_os_string().into_string().unwrap();
     if !use_ffnx || ctx.config.launch_chocobo {
         log::info!(
             "Launching process {:?} without FFNx context: {:?}",
@@ -147,8 +148,11 @@ fn main() -> Result<()> {
             // TODO:
         }
 
-        let process_info = create_game_process(process_to_start_path)?;
-        log::info!("Process launched (process_id: {})!", process_info.dwProcessId);
+        let process_info = create_game_process(process_to_start_path, &process_cwd)?;
+        log::info!(
+            "Process launched (process_id: {})!",
+            process_info.dwProcessId
+        );
 
         unsafe {
             WaitForSingleObject(process_info.hProcess, INFINITE);
@@ -165,8 +169,11 @@ fn main() -> Result<()> {
             process_to_start_path,
             &ctx
         );
-        let process_info = create_game_process(process_to_start_path)?;
-        log::info!("Process launched (process_id: {})!", process_info.dwProcessId);
+        let process_info = create_game_process(process_to_start_path, &process_cwd)?;
+        log::info!(
+            "Process launched (process_id: {})!",
+            process_info.dwProcessId
+        );
         unsafe {
             WaitForSingleObject(process_info.hProcess, INFINITE);
 
@@ -178,32 +185,38 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn create_game_process(process_to_start: PathBuf) -> Result<PROCESS_INFORMATION> {
-    let startup_info = STARTUPINFOA::default();
+fn create_game_process(process_to_start: String, process_cwd: &Path) -> Result<PROCESS_INFORMATION> {
+    let startup_info = STARTUPINFOA {
+        cb: size_of::<STARTUPINFOA>() as u32,
+        ..Default::default()
+    };
     let mut process_info = PROCESS_INFORMATION::default();
     unsafe {
-        let Ok(_) = CreateProcessA(
-            PCSTR(process_to_start.into_os_string().as_encoded_bytes().as_ptr()),
+        match CreateProcessA(
+            PCSTR(process_to_start.as_ptr()),
             PSTR::null(),
             None,
             None,
             false,
             PROCESS_CREATION_FLAGS::default(),
             None,
-            None,
+            PCSTR(process_cwd.as_os_str().as_encoded_bytes().as_ptr()),
             &startup_info,
             &mut process_info,
-        ) else {
-            _ = MessageBoxA(
-                None,
-                s!("Something went wrong while launching the game."),
-                s!("Error"),
-                MB_ICONERROR | MB_OK,
-            );
-            log::error!("Something went wrong while launching the game.");
-            return Err(anyhow::anyhow!(
-                "Something went wrong while launching the game"
-            ));
+        ) {
+            Ok(_) => {}
+            Err(err) => {
+                _ = MessageBoxA(
+                    None,
+                    s!("Something went wrong while launching the game."),
+                    s!("Error"),
+                    MB_ICONERROR | MB_OK,
+                );
+                log::error!("Something went wrong while launching the game (process_id {}): {:?}", process_info.dwProcessId, err);
+                return Err(anyhow::anyhow!(
+                    format!("Something went wrong while launching the game: {:?}", err)
+                ));
+            }
         };
     }
     Ok(process_info)
