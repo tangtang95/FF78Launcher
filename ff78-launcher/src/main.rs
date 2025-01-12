@@ -6,7 +6,7 @@ mod launcher;
 use anyhow::Result;
 use config::Config;
 use launcher::{
-    send_locale_data_dir, send_user_doc_dir, send_user_save_dir, write_ffsound, write_ffvideo,
+    send_bg_pause_enabled, send_disable_cloud, send_game_version, send_install_dir, send_launcher_completed, send_locale_data_dir, send_user_doc_dir, send_user_save_dir, write_ffsound, write_ffvideo
 };
 use log::LevelFilter;
 use std::{
@@ -240,11 +240,11 @@ fn launch_process() -> Result<()> {
             send_locale_data_dir(&ctx, &mut launcher_context);
             send_user_save_dir(&ctx, &mut launcher_context)?;
             send_user_doc_dir(&ctx, &mut launcher_context)?;
-            // send_install_dir();
-            // send_game_version();
-            // send_disable_cloud();
-            // send_bg_pause_enabled();
-            // send_launcher_completed();
+            send_install_dir(&ctx, &mut launcher_context)?;
+            send_game_version(&ctx, &mut launcher_context);
+            send_disable_cloud(&ctx, &mut launcher_context);
+            send_bg_pause_enabled(&ctx, &mut launcher_context);
+            send_launcher_completed(&ctx, &mut launcher_context);
 
             _ = output.wait()?;
 

@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::{io::Write, os::windows::ffi::OsStrExt};
 
 use anyhow::Result;
 use windows::Win32::{
@@ -9,7 +9,7 @@ use windows::Win32::{
     UI::Shell::{FOLDERID_Documents, SHGetKnownFolderPath, KF_FLAG_DEFAULT},
 };
 
-use crate::{Context, GameType, LauncherContext, StoreType};
+use crate::{Context, GameType, LauncherContext, StoreType, APP_NAME};
 
 const FF7_USER_SAVE_DIR: u8 = 10;
 const FF7_DOC_DIR: u8 = 11;
@@ -35,33 +35,6 @@ const ESTORE_LOCALE_DATA_DIR: u8 = 12;
 const ESTORE_GAME_VERSION: u8 = 17;
 const ESTORE_END_USER_INFO: u8 = 20;
 
-pub fn get_game_metadata_path(ctx: &Context) -> Result<String> {
-    let mut game_install_path = String::new();
-    if !matches!(ctx.game_to_launch, GameType::FF7(StoreType::EStore))
-        && std::fs::exists("data/music_2").is_err()
-    {
-        let doc_path = unsafe {
-            let doc_path_pw = SHGetKnownFolderPath(&FOLDERID_Documents, KF_FLAG_DEFAULT, None)?;
-            let doc_path = doc_path_pw.to_string()?;
-            CoTaskMemFree(Some(doc_path_pw.as_ptr() as _));
-            doc_path
-        };
-        game_install_path += &doc_path;
-        game_install_path += "\\Square Enix\\FINAL FANTASY ";
-        game_install_path += match ctx.game_to_launch {
-            GameType::FF7(_) => "VII Steam",
-            GameType::FF8 => "VIII Steam",
-        }
-    } else {
-        let cwd = std::env::current_dir()?
-            .to_str()
-            .ok_or(anyhow::anyhow!("cwd cannot be converted to string"))?
-            .to_string();
-        game_install_path += &cwd;
-    }
-    Ok(game_install_path)
-}
-
 pub fn send_locale_data_dir(ctx: &Context, launcher_ctx: &mut LauncherContext) {
     let payload: Vec<u16> = (String::from("lang-") + &ctx.game_lang)
         .encode_utf16()
@@ -72,9 +45,8 @@ pub fn send_locale_data_dir(ctx: &Context, launcher_ctx: &mut LauncherContext) {
         GameType::FF7(StoreType::EStore) => ESTORE_LOCALE_DATA_DIR,
         GameType::FF8 => FF8_LOCALE_DATA_DIR,
     });
-    launcher_game_part.append(&mut (payload.len() as u32).to_le_bytes().to_vec());
+    launcher_game_part.extend_from_slice(&(payload.len() as u32).to_le_bytes());
     launcher_game_part.append(&mut payload.into_iter().flat_map(|b| b.to_le_bytes()).collect());
-    launcher_game_part.push(0);
     unsafe {
         // NOTE: Safe since single threaded
         std::ptr::copy(
@@ -115,9 +87,8 @@ pub fn send_user_save_dir(ctx: &Context, launcher_ctx: &mut LauncherContext) -> 
         GameType::FF7(StoreType::EStore) => ESTORE_USER_SAVE_DIR,
         GameType::FF8 => FF8_USER_SAVE_DIR,
     });
-    launcher_game_part.append(&mut (payload.len() as u32).to_le_bytes().to_vec());
+    launcher_game_part.extend_from_slice(&(payload.len() as u32).to_le_bytes());
     launcher_game_part.append(&mut payload.into_iter().flat_map(|b| b.to_le_bytes()).collect());
-    launcher_game_part.push(0);
     unsafe {
         // NOTE: Safe since single threaded
         std::ptr::copy(
@@ -140,7 +111,7 @@ pub fn send_user_doc_dir(ctx: &Context, launcher_ctx: &mut LauncherContext) -> R
         GameType::FF7(StoreType::EStore) => ESTORE_DOC_DIR,
         GameType::FF8 => FF8_DOC_DIR,
     });
-    launcher_game_part.append(&mut (payload.len() as u32).to_le_bytes().to_vec());
+    launcher_game_part.extend_from_slice(&(payload.len() as u32).to_le_bytes());
     launcher_game_part.append(&mut payload.into_iter().flat_map(|b| b.to_le_bytes()).collect());
     launcher_game_part.push(0);
     unsafe {
@@ -155,6 +126,118 @@ pub fn send_user_doc_dir(ctx: &Context, launcher_ctx: &mut LauncherContext) -> R
 
     wait_for_game(launcher_ctx);
     Ok(())
+}
+
+pub fn send_install_dir(ctx: &Context, launcher_ctx: &mut LauncherContext) -> Result<()> {
+    let cwd = std::fs::canonicalize("./")?;
+    let payload: Vec<u16> = cwd.into_os_string().encode_wide().collect();
+    let mut launcher_game_part = Vec::<u8>::new();
+    launcher_game_part.push(match ctx.game_to_launch {
+        GameType::FF7(StoreType::Standard) => FF7_INSTALL_DIR,
+        GameType::FF7(StoreType::EStore) => ESTORE_INSTALL_DIR,
+        GameType::FF8 => FF8_INSTALL_DIR,
+    });
+    launcher_game_part.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    launcher_game_part.append(&mut payload.into_iter().flat_map(|b| b.to_le_bytes()).collect());
+    unsafe {
+        // NOTE: Safe since single threaded
+        std::ptr::copy(
+            launcher_game_part.as_ptr(),
+            launcher_ctx.launcher_memory_part as _,
+            launcher_game_part.len(),
+        );
+    };
+    log::info!("send_install_dir -> {launcher_game_part:?}");
+
+    wait_for_game(launcher_ctx);
+    Ok(())
+}
+
+pub fn send_game_version(ctx: &Context, launcher_ctx: &mut LauncherContext) {
+    let payload: Vec<u16> = (APP_NAME.to_string() + " 1.0.0").encode_utf16().collect();
+    let mut launcher_game_part = Vec::<u8>::new();
+    launcher_game_part.push(match ctx.game_to_launch {
+        GameType::FF7(StoreType::Standard) => FF7_GAME_VERSION,
+        GameType::FF7(StoreType::EStore) => ESTORE_GAME_VERSION,
+        GameType::FF8 => FF8_GAME_VERSION,
+    });
+    launcher_game_part.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    launcher_game_part.append(&mut payload.into_iter().flat_map(|b| b.to_le_bytes()).collect());
+    unsafe {
+        // NOTE: Safe since single threaded
+        std::ptr::copy(
+            launcher_game_part.as_ptr(),
+            launcher_ctx.launcher_memory_part as _,
+            launcher_game_part.len(),
+        );
+    };
+    log::info!("send_game_version -> {launcher_game_part:?}");
+
+    wait_for_game(launcher_ctx);
+}
+
+pub fn send_disable_cloud(ctx: &Context, launcher_ctx: &mut LauncherContext) {
+    if let GameType::FF7(StoreType::EStore) = ctx.game_to_launch {
+        return;
+    }
+
+    let launcher_game_part = vec![match ctx.game_to_launch {
+        GameType::FF7(_) => FF7_DISABLE_CLOUD,
+        GameType::FF8 => FF8_DISABLE_CLOUD,
+    }];
+    unsafe {
+        // NOTE: Safe since single threaded
+        std::ptr::copy(
+            launcher_game_part.as_ptr(),
+            launcher_ctx.launcher_memory_part as _,
+            launcher_game_part.len(),
+        );
+    };
+    log::info!("send_disable_cloud -> {launcher_game_part:?}");
+
+    wait_for_game(launcher_ctx);
+}
+
+pub fn send_bg_pause_enabled(ctx: &Context, launcher_ctx: &mut LauncherContext) {
+    if let GameType::FF7(_) = ctx.game_to_launch {
+        return;
+    }
+
+    let mut launcher_game_part = vec![match ctx.game_to_launch {
+        GameType::FF7(_) => unreachable!(),
+        GameType::FF8 => FF8_BG_PAUSE_ENABLED,
+    }];
+    launcher_game_part.extend_from_slice(&1u32.to_le_bytes());
+    unsafe {
+        // NOTE: Safe since single threaded
+        std::ptr::copy(
+            launcher_game_part.as_ptr(),
+            launcher_ctx.launcher_memory_part as _,
+            launcher_game_part.len(),
+        );
+    };
+    log::info!("send_bg_pause_enabled -> {launcher_game_part:?}");
+
+    wait_for_game(launcher_ctx);
+}
+
+pub fn send_launcher_completed(ctx: &Context, launcher_ctx: &mut LauncherContext) {
+    let launcher_game_part = vec![match ctx.game_to_launch {
+        GameType::FF7(StoreType::Standard) => FF7_END_USER_INFO,
+        GameType::FF7(StoreType::EStore) => ESTORE_END_USER_INFO,
+        GameType::FF8 => FF8_END_USER_INFO,
+    }];
+    unsafe {
+        // NOTE: Safe since single threaded
+        std::ptr::copy(
+            launcher_game_part.as_ptr(),
+            launcher_ctx.launcher_memory_part as _,
+            launcher_game_part.len(),
+        );
+    };
+    log::info!("send_launcher_completed -> {launcher_game_part:?}");
+
+    wait_for_game(launcher_ctx);
 }
 
 pub fn write_ffvideo(ctx: &Context) -> Result<()> {
@@ -188,6 +271,33 @@ pub fn write_ffsound(ctx: &Context) -> Result<()> {
     file.write_all(&ctx.config.sfx_volume.to_le_bytes())?;
     file.write_all(&ctx.config.music_volume.to_le_bytes())?;
     Ok(())
+}
+
+fn get_game_metadata_path(ctx: &Context) -> Result<String> {
+    let mut game_install_path = String::new();
+    if !matches!(ctx.game_to_launch, GameType::FF7(StoreType::EStore))
+        && std::fs::exists("data/music_2").is_err()
+    {
+        let doc_path = unsafe {
+            let doc_path_pw = SHGetKnownFolderPath(&FOLDERID_Documents, KF_FLAG_DEFAULT, None)?;
+            let doc_path = doc_path_pw.to_string()?;
+            CoTaskMemFree(Some(doc_path_pw.as_ptr() as _));
+            doc_path
+        };
+        game_install_path += &doc_path;
+        game_install_path += "\\Square Enix\\FINAL FANTASY ";
+        game_install_path += match ctx.game_to_launch {
+            GameType::FF7(_) => "VII Steam",
+            GameType::FF8 => "VIII Steam",
+        }
+    } else {
+        let cwd = std::env::current_dir()?
+            .to_str()
+            .ok_or(anyhow::anyhow!("cwd cannot be converted to string"))?
+            .to_string();
+        game_install_path += &cwd;
+    }
+    Ok(game_install_path)
 }
 
 fn wait_for_game(launcher_ctx: &mut LauncherContext) {
