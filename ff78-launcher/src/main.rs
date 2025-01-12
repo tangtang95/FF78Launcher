@@ -6,7 +6,9 @@ mod launcher;
 use anyhow::Result;
 use config::Config;
 use launcher::{
-    send_bg_pause_enabled, send_disable_cloud, send_game_version, send_install_dir, send_launcher_completed, send_locale_data_dir, send_user_doc_dir, send_user_save_dir, write_ffsound, write_ffvideo
+    send_bg_pause_enabled, send_disable_cloud, send_game_version, send_install_dir,
+    send_launcher_completed, send_locale_data_dir, send_user_doc_dir, send_user_save_dir,
+    write_ffsound, write_ffvideo,
 };
 use log::LevelFilter;
 use std::{
@@ -26,7 +28,10 @@ use windows::{
                 CreateFileMappingA, MapViewOfFile, UnmapViewOfFile, FILE_MAP_ALL_ACCESS,
                 PAGE_READWRITE,
             },
-            Threading::{CreateSemaphoreA, CreateThread, ReleaseSemaphore, WaitForSingleObject, INFINITE, THREAD_CREATION_FLAGS},
+            Threading::{
+                CreateSemaphoreA, CreateThread, ReleaseSemaphore, WaitForSingleObject, INFINITE,
+                THREAD_CREATION_FLAGS,
+            },
         },
         UI::WindowsAndMessaging::{MessageBoxA, MB_ICONERROR, MB_OK},
     },
@@ -77,17 +82,18 @@ pub struct Context {
 pub struct LauncherContext {
     game_can_read_sem: HANDLE,
     game_did_read_sem: HANDLE,
-    launcher_can_read_sem: HANDLE,
-    launcher_did_read_sem: HANDLE,
     launcher_memory_part: *mut c_void,
 }
 
 unsafe extern "system" fn process_game_messages(launcher_ctx: *mut core::ffi::c_void) -> u32 {
     log::info!("Starting game message queue thread...");
-    let launcher_ctx = std::ptr::read(launcher_ctx as *mut LauncherContext);
+    let (launcher_can_read_sem, launcher_did_read_sem) =
+        std::ptr::read(launcher_ctx as *mut (HANDLE, HANDLE));
     loop {
-        WaitForSingleObject(launcher_ctx.launcher_can_read_sem, INFINITE);
-        _ = ReleaseSemaphore(launcher_ctx.launcher_did_read_sem, 1, None);
+        log::info!("game message thread waiting for launcherCanReadSem semaphore...");
+        WaitForSingleObject(launcher_can_read_sem, INFINITE);
+        log::info!("game message thread releasing launcherDidReadSem semaphore...");
+        _ = ReleaseSemaphore(launcher_did_read_sem, 1, None);
     }
 }
 
@@ -221,16 +227,15 @@ fn launch_process() -> Result<()> {
             let mut launcher_context = LauncherContext {
                 game_can_read_sem,
                 game_did_read_sem,
-                launcher_can_read_sem,
-                launcher_did_read_sem,
                 launcher_memory_part,
             };
+
             // NOTE: launcher_context will have two mutable references
             let process_game_messages_thread = CreateThread(
                 None,
                 0,
                 Some(process_game_messages),
-                Some(std::ptr::from_mut(&mut launcher_context) as _),
+                Some(std::ptr::from_mut(&mut (launcher_can_read_sem, launcher_did_read_sem)) as _),
                 THREAD_CREATION_FLAGS::default(),
                 None,
             )?;
