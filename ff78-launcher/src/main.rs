@@ -1,14 +1,23 @@
 #![windows_subsystem = "windows"]
 
+mod config;
+mod launcher;
+
 use anyhow::Result;
 use config::Config;
-use launcher::{write_ffsound, write_ffvideo};
+use launcher::{
+    send_locale_data_dir, send_user_doc_dir, send_user_save_dir, write_ffsound, write_ffvideo,
+};
 use log::LevelFilter;
-use std::{ffi::CString, os::windows::fs::MetadataExt};
+use std::{
+    ffi::{c_void, CString},
+    os::windows::fs::MetadataExt,
+    process::Command,
+};
 use windows::{
-    core::{s, PCSTR, PSTR},
+    core::{s, PCSTR},
     Win32::{
-        Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
+        Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE},
         System::{
             Diagnostics::Debug::{
                 SetUnhandledExceptionFilter, EXCEPTION_CONTINUE_EXECUTION, EXCEPTION_POINTERS,
@@ -17,17 +26,11 @@ use windows::{
                 CreateFileMappingA, MapViewOfFile, UnmapViewOfFile, FILE_MAP_ALL_ACCESS,
                 PAGE_READWRITE,
             },
-            Threading::{
-                CreateProcessA, CreateSemaphoreA, CreateThread, WaitForSingleObject, INFINITE,
-                PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTUPINFOA, THREAD_CREATION_FLAGS,
-            },
+            Threading::{CreateSemaphoreA, CreateThread, ReleaseSemaphore, WaitForSingleObject, INFINITE, THREAD_CREATION_FLAGS},
         },
         UI::WindowsAndMessaging::{MessageBoxA, MB_ICONERROR, MB_OK},
     },
 };
-
-mod config;
-mod launcher;
 
 const APP_NAME: &str = "FF78Launcher";
 const LOG_FILE: &str = "FF78Launcher.log";
@@ -70,8 +73,22 @@ pub struct Context {
     config: Config,
 }
 
-unsafe extern "system" fn process_game_messages(_: *mut core::ffi::c_void) -> u32 {
-    todo!()
+#[derive(Debug)]
+pub struct LauncherContext {
+    game_can_read_sem: HANDLE,
+    game_did_read_sem: HANDLE,
+    launcher_can_read_sem: HANDLE,
+    launcher_did_read_sem: HANDLE,
+    launcher_memory_part: *mut c_void,
+}
+
+unsafe extern "system" fn process_game_messages(launcher_ctx: *mut core::ffi::c_void) -> u32 {
+    log::info!("Starting game message queue thread...");
+    let launcher_ctx = std::ptr::read(launcher_ctx as *mut LauncherContext);
+    loop {
+        WaitForSingleObject(launcher_ctx.launcher_can_read_sem, INFINITE);
+        _ = ReleaseSemaphore(launcher_ctx.launcher_did_read_sem, 1, None);
+    }
 }
 
 fn main() -> Result<()> {
@@ -86,6 +103,14 @@ fn main() -> Result<()> {
         Ok(_) => Ok(()),
         Err(err) => {
             log::error!("Launching process failed due: {:?}", err);
+            unsafe {
+                _ = MessageBoxA(
+                    None,
+                    s!("Something went wrong while launching the game. Check the log file for more info"),
+                    s!("Error"),
+                    MB_ICONERROR | MB_OK,
+                );
+            }
             Err(err)
         }
     }
@@ -148,10 +173,8 @@ fn launch_process() -> Result<()> {
     let process_filename = std::fs::canonicalize(&process_to_start)?
         .file_name()
         .ok_or(anyhow::anyhow!("Filename of process not found"))?
-        .to_os_string()
-        .into_string()
-        .map_err(|_| anyhow::anyhow!("Couldn't transform OsString to String"))?;
-    if !use_ffnx || ctx.config.launch_chocobo {
+        .to_os_string();
+    if !ctx.use_ffnx || ctx.config.launch_chocobo {
         log::info!(
             "Launching process {:?} without FFNx context: {:?}",
             process_filename,
@@ -195,34 +218,36 @@ fn launch_process() -> Result<()> {
             )?;
             let view_shared_memory = MapViewOfFile(shared_memory, FILE_MAP_ALL_ACCESS, 0, 0, 0);
             let launcher_memory_part = view_shared_memory.Value.offset(0x10000);
+            let mut launcher_context = LauncherContext {
+                game_can_read_sem,
+                game_did_read_sem,
+                launcher_can_read_sem,
+                launcher_did_read_sem,
+                launcher_memory_part,
+            };
+            // NOTE: launcher_context will have two mutable references
             let process_game_messages_thread = CreateThread(
                 None,
                 0,
                 Some(process_game_messages),
-                None,
+                Some(std::ptr::from_mut(&mut launcher_context) as _),
                 THREAD_CREATION_FLAGS::default(),
                 None,
             )?;
-            let process_info = create_game_process(CString::new(process_filename)?)?;
-            log::info!(
-                "Process launched (process_id: {})!",
-                process_info.dwProcessId
-            );
+            let mut output = Command::new(process_filename).spawn()?;
+            log::info!("Process launched (process_id: {})!", output.id());
 
-            // send_locale_data_dir();
-            // send_user_save_dir();
-            // send_user_doc_dir();
+            send_locale_data_dir(&ctx, &mut launcher_context);
+            send_user_save_dir(&ctx, &mut launcher_context)?;
+            send_user_doc_dir(&ctx, &mut launcher_context)?;
             // send_install_dir();
             // send_game_version();
             // send_disable_cloud();
             // send_bg_pause_enabled();
             // send_launcher_completed();
 
-            WaitForSingleObject(process_info.hProcess, INFINITE);
+            _ = output.wait()?;
 
-            // Close process and thread handles
-            _ = CloseHandle(process_info.hProcess);
-            _ = CloseHandle(process_info.hThread);
             _ = CloseHandle(process_game_messages_thread);
 
             _ = UnmapViewOfFile(view_shared_memory);
@@ -238,57 +263,12 @@ fn launch_process() -> Result<()> {
             process_filename,
             &ctx
         );
-        let process_info = create_game_process(CString::new(process_filename)?)?;
-        log::info!(
-            "Process launched (process_id: {})!",
-            process_info.dwProcessId
-        );
-        unsafe {
-            WaitForSingleObject(process_info.hProcess, INFINITE);
-
-            _ = CloseHandle(process_info.hProcess);
-            _ = CloseHandle(process_info.hThread);
-        }
+        let mut output = Command::new(process_filename).spawn()?;
+        log::info!("Process launched (process_id: {})!", output.id());
+        _ = output.wait()?;
     }
 
     Ok(())
-}
-
-fn create_game_process(process_to_start: CString) -> Result<PROCESS_INFORMATION> {
-    let startup_info = STARTUPINFOA {
-        cb: size_of::<STARTUPINFOA>() as u32,
-        ..Default::default()
-    };
-    let mut process_info = PROCESS_INFORMATION::default();
-    unsafe {
-        match CreateProcessA(
-            PCSTR(process_to_start.as_ptr() as _),
-            PSTR::null(),
-            None,
-            None,
-            false,
-            PROCESS_CREATION_FLAGS::default(),
-            None,
-            None,
-            &startup_info,
-            &mut process_info,
-        ) {
-            Ok(_) => {}
-            Err(err) => {
-                _ = MessageBoxA(
-                    None,
-                    s!("Something went wrong while launching the game."),
-                    s!("Error"),
-                    MB_ICONERROR | MB_OK,
-                );
-                return Err(anyhow::anyhow!(format!(
-                    "Something went wrong while launching the game: {:?}",
-                    err
-                )));
-            }
-        };
-    }
-    Ok(process_info)
 }
 
 unsafe extern "system" fn exception_handler(ep: *const EXCEPTION_POINTERS) -> i32 {
