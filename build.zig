@@ -82,6 +82,10 @@ fn setLibcWithXWin(b: *std.Build, exe: *std.Build.Step.Compile) void {
     exe.addSystemIncludePath(.{ .cwd_relative = sdkPath("/.xwin/crt/include") });
     exe.addSystemIncludePath(.{ .cwd_relative = sdkPath("/.xwin/sdk/include/ucrt") });
     exe.addSystemIncludePath(.{ .cwd_relative = sdkPath("/.xwin/sdk/include/um") });
+    exe.addSystemIncludePath(.{ .cwd_relative = sdkPath("/.xwin/sdk/include/10.0.26100/cppwinrt") });
+    exe.addSystemIncludePath(.{ .cwd_relative = sdkPath("/.xwin/sdk/include/10.0.26100/ucrt") });
+    exe.addSystemIncludePath(.{ .cwd_relative = sdkPath("/.xwin/sdk/include/10.0.26100/um") });
+    exe.addSystemIncludePath(.{ .cwd_relative = sdkPath("/.xwin/sdk/include/10.0.26100/shared") });
     exe.addLibraryPath(.{ .cwd_relative = b.fmt(sdkPath("/.xwin/crt/lib/{s}"), .{arch}) });
     exe.addLibraryPath(.{ .cwd_relative = b.fmt(sdkPath("/.xwin/sdk/lib/ucrt/{s}"), .{arch}) });
     exe.addLibraryPath(.{ .cwd_relative = b.fmt(sdkPath("/.xwin/sdk/lib/um/{s}"), .{arch}) });
