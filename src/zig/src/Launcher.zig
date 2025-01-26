@@ -52,16 +52,28 @@ pub fn writeVideoConfig(cfg: Config) !void {
     try filepath.appendSlice(video_config_file);
     const file = try std.fs.cwd().openFile(filepath.items, .{ .mode = .read_write });
     defer file.close();
-    try file.writer().writeInt(i32, @as(i32, cfg.window_width), .little);
-    try file.writer().writeInt(i32, @as(i32, cfg.window_height), .little);
-    try file.writer().writeInt(i32, @as(i32, cfg.refresh_rate), .little);
-    try file.writer().writeInt(i32, @as(i32, cfg.fullscreen), .little);
-    try file.writer().writeInt(i32, 0, .little);
-    try file.writer().writeInt(i32, @as(i32, cfg.keep_aspect_ratio), .little);
-    try file.writer().writeInt(i32, @as(i32, cfg.enable_linear_filtering), .little);
-    try file.writer().writeInt(i32, @as(i32, cfg.original_mode), .little);
-    if (config.game_type == .ff8) {
-        try file.writer().writeInt(i32, @as(i32, cfg.pause_game_on_background), .little);
+    switch (config.game_type) {
+        .ff7 => {
+            try file.writer().writeInt(i32, @as(i32, cfg.window_width), .big);
+            try file.writer().writeInt(i32, @as(i32, cfg.window_height), .big);
+            try file.writer().writeInt(i32, @as(i32, cfg.refresh_rate), .big);
+            try file.writer().writeInt(i32, @as(i32, cfg.fullscreen), .big);
+            try file.writer().writeInt(i32, 0, .big);
+            try file.writer().writeInt(i32, @as(i32, cfg.keep_aspect_ratio), .big);
+            try file.writer().writeInt(i32, @as(i32, cfg.enable_linear_filtering), .big);
+            try file.writer().writeInt(i32, @as(i32, cfg.original_mode), .big);
+        },
+        .ff8 => {
+            try file.writer().writeInt(i32, @as(i32, cfg.window_width), .little);
+            try file.writer().writeInt(i32, @as(i32, cfg.window_height), .little);
+            try file.writer().writeInt(i32, @as(i32, cfg.refresh_rate), .little);
+            try file.writer().writeInt(i32, @as(i32, cfg.fullscreen), .little);
+            try file.writer().writeInt(i32, 0, .little);
+            try file.writer().writeInt(i32, @as(i32, cfg.keep_aspect_ratio), .little);
+            try file.writer().writeInt(i32, @as(i32, cfg.enable_linear_filtering), .little);
+            try file.writer().writeInt(i32, @as(i32, cfg.original_mode), .little);
+            try file.writer().writeInt(i32, @as(i32, cfg.pause_game_on_background), .little);
+        }
     }
 }
 
@@ -72,6 +84,6 @@ pub fn writeSoundConfig(cfg: Config) !void {
     try filepath.appendSlice(sound_config_file);
     const file = try std.fs.cwd().openFile(filepath.items, .{ .mode = .read_write });
     defer file.close();
-    try file.writer().writeInt(i32, @as(i32, cfg.sfx_volume), .little);
-    try file.writer().writeInt(i32, @as(i32, cfg.music_volume), .little);
+    try file.writer().writeInt(i32, @intCast(cfg.sfx_volume), .little);
+    try file.writer().writeInt(i32, @intCast(cfg.music_volume), .little);
 }

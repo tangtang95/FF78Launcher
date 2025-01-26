@@ -22,4 +22,7 @@ pub fn build(b: *std.Build) !void {
     const run_exe = b.addRunArtifact(exe);
     const run_step = b.step("run", "run executable");
     run_step.dependOn(&run_exe.step);
+
+    const check_step = b.step("check", "check if compiles");
+    check_step.dependOn(&exe.step);
 }
